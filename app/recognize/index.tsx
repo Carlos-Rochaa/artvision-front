@@ -46,45 +46,58 @@ export default function Recognize() {
   // ---------------------------------------
   //     ENVIO DE PERGUNTA EM TEXTO → /chat
   // ---------------------------------------
-  async function sendTextToBackend(userText: string) {
-    addMessage({ sender: "bot", type: "typing" });
+  
 
-    try {
-      const response = await fetch("http://192.168.0.16:8001/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userText }),
-      });
+  async function sendMessage() {
+  if (!text.trim()) return;
 
-      const json = await response.json();
+  const userMsg = text;
 
-      removeTyping();
+  const previousMessages = messages
+    .filter(m => m.type === "text")
+    .map((m, index) => ({
+      user: m.sender === "user" ? m.content : "",
+      bot: m.sender === "bot" ? m.content : ""
+    }))
+    .filter(h => h.user !== "" || h.bot !== "");
 
-      addMessage({
-        sender: "bot",
-        type: "text",
-        content: json.response,
-      });
-    } catch (e) {
-      removeTyping();
-      addMessage({
-        sender: "bot",
-        type: "text",
-        content: "Erro ao processar sua pergunta.",
-      });
-    }
+  addMessage({ sender: "user", type: "text", content: userMsg });
+  setText("");
+
+  addMessage({ sender: "bot", type: "typing" });
+
+  try {
+    const response = await fetch("http://192.168.0.16:8001/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: userMsg,
+        history: previousMessages
+      }),
+    });
+
+    const json = await response.json();
+
+    removeTyping();
+
+    addMessage({
+      sender: "bot",
+      type: "text",
+      content: json.response,
+    });
+  } catch (e) {
+    removeTyping();
+    addMessage({
+      sender: "bot",
+      type: "text",
+      content: "Erro ao conectar com o servidor.",
+    });
   }
+}
 
-  // Enviar texto do usuário
-  function sendMessage() {
-    if (!text.trim()) return;
 
-    const userText = text;
-    addMessage({ sender: "user", type: "text", content: userText });
-    setText("");
-
-    sendTextToBackend(userText);
-  }
 
   // ---------------------------------------
   //       ENVIO DE IMAGEM → /analyze
