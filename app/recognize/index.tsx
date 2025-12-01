@@ -1,85 +1,95 @@
-import React, { useRef, useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
+  View,
+  Text,
   Image,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   TouchableOpacity,
-  View,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
 } from "react-native";
 
-import { Camera } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import Markdown from "react-native-markdown-display";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import {
-  SafeAreaView,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+// Ícones
+import { Feather } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 
 export default function Recognize() {
   const [messages, setMessages] = useState<any[]>([]);
-  const [input, setInput] = useState("");
-  const scrollRef = useRef<ScrollView>(null);
+  const [text, setText] = useState("");
+  const scrollRef = useRef<ScrollView | null>(null);
 
   const insets = useSafeAreaInsets();
 
   function addMessage(msg: any) {
     setMessages((prev) => [...prev, msg]);
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 200);
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 150);
   }
 
-  // ============================
-  // 📎 Selecionar imagem
-  // ============================
-  async function pickFromGallery() {
-    const pick = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.9,
-    });
-
-    if (!pick.canceled) {
-      sendImage(pick.assets[0].uri);
-    }
-  }
-
-  // ============================
-  // 📷 Tirar foto com câmera
-  // ============================
-  async function takePhoto() {
-    const permission = await Camera.requestCameraPermissionsAsync();
-
-    if (!permission.granted) {
-      alert("Permita acesso à câmera para usar essa função.");
-      return;
-    }
-
-    const pic = await ImagePicker.launchCameraAsync({
-      quality: 0.9,
-    });
-
-    if (!pic.canceled) {
-      sendImage(pic.assets[0].uri);
-    }
-  }
-
-  async function sendImage(uri: string) {
+  useEffect(() => {
     addMessage({
-      sender: "user",
-      type: "image",
-      image: uri,
+      sender: "bot",
+      type: "text",
+      content:
+        "Olá! Eu sou o **ArtVision**, seu assistente para análise de obras de arte.\n\nEnvie uma imagem ou faça uma pergunta sobre arte.",
     });
+  }, []);
 
-    analyze(uri);
+  // ---------------------------------------
+  //     ENVIO DE PERGUNTA EM TEXTO → /chat
+  // ---------------------------------------
+  async function sendTextToBackend(userText: string) {
+    addMessage({ sender: "bot", type: "typing" });
+
+    try {
+      const response = await fetch("http://192.168.0.16:8001/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userText }),
+      });
+
+      const json = await response.json();
+
+      removeTyping();
+
+      addMessage({
+        sender: "bot",
+        type: "text",
+        content: json.response,
+      });
+    } catch (e) {
+      removeTyping();
+      addMessage({
+        sender: "bot",
+        type: "text",
+        content: "Erro ao processar sua pergunta.",
+      });
+    }
   }
 
-  // ============================
-  // 🔍 Enviar para análise API
-  // ============================
-  async function analyze(uri: string) {
+  // Enviar texto do usuário
+  function sendMessage() {
+    if (!text.trim()) return;
+
+    const userText = text;
+    addMessage({ sender: "user", type: "text", content: userText });
+    setText("");
+
+    sendTextToBackend(userText);
+  }
+
+  // ---------------------------------------
+  //       ENVIO DE IMAGEM → /analyze
+  // ---------------------------------------
+  async function analyzeImage(uri: string) {
     addMessage({ sender: "bot", type: "typing" });
 
     const form = new FormData();
@@ -109,8 +119,39 @@ export default function Recognize() {
       addMessage({
         sender: "bot",
         type: "text",
-        content: "❌ Erro ao conectar ao servidor.",
+        content: "Erro ao conectar com o servidor.",
       });
+    }
+  }
+
+  async function pickImage() {
+    const pick = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.9,
+    });
+
+    if (!pick.canceled) {
+      const uri = pick.assets[0].uri;
+      addMessage({ sender: "user", type: "image", image: uri });
+      await analyzeImage(uri);
+    }
+  }
+
+  async function pickCamera() {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      alert("Permissão para acessar câmera negada.");
+      return;
+    }
+
+    const shot = await ImagePicker.launchCameraAsync({
+      quality: 0.9,
+    });
+
+    if (!shot.canceled) {
+      const uri = shot.assets[0].uri;
+      addMessage({ sender: "user", type: "image", image: uri });
+      await analyzeImage(uri);
     }
   }
 
@@ -118,39 +159,19 @@ export default function Recognize() {
     setMessages((prev) => prev.filter((m) => m.type !== "typing"));
   }
 
-  // ============================
-  // ✉️ Enviar mensagem normal
-  // ============================
-  function sendText() {
-    if (input.trim().length === 0) return;
-
-    addMessage({
-      sender: "user",
-      type: "text",
-      content: input,
-    });
-
-    setInput("");
-
-    addMessage({
-      sender: "bot",
-      type: "text",
-      content:
-        "✨ Envie uma imagem 📷📎 para receber uma análise artística detalhada.",
-    });
-  }
-
-  // ============================
-  // UI
-  // ============================
   return (
-    <SafeAreaView style={[styles.container, { paddingBottom: insets.bottom }]}>
+    <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={80}
       >
-        {/* CHAT */}
-        <ScrollView ref={scrollRef} style={styles.chat}>
+        <ScrollView
+          ref={scrollRef}
+          style={styles.chat}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: 80 }}
+        >
           {messages.map((msg, index) => {
             const isUser = msg.sender === "user";
 
@@ -158,18 +179,10 @@ export default function Recognize() {
               <View
                 key={index}
                 style={[
-                  styles.messageRow,
-                  isUser ? styles.userRow : styles.botRow,
+                  styles.messageContainer,
+                  isUser ? styles.userAlign : styles.botAlign,
                 ]}
               >
-                {/* Bot avatar */}
-                {!isUser && (
-                  <Image
-                    source={{ uri: "https://i.imgur.com/7k12EPD.png" }}
-                    style={styles.avatar}
-                  />
-                )}
-
                 <View
                   style={[
                     styles.bubble,
@@ -181,45 +194,43 @@ export default function Recognize() {
                   )}
 
                   {msg.type === "typing" && (
-                    <Text style={{ color: "#666" }}>
+                    <Text style={{ color: "#aaa" }}>
                       ArtVision está analisando…
                     </Text>
                   )}
 
-                  {msg.type === "text" && <Markdown>{msg.content}</Markdown>}
+                  {msg.type === "text" && (
+                    <Markdown style={markdownStyles}>
+                      {msg.content}
+                    </Markdown>
+                  )}
                 </View>
-
-                {/* User avatar */}
-                {isUser && (
-                  <Image
-                    source={{ uri: "https://i.imgur.com/Yo8QFMB.png" }}
-                    style={styles.avatar}
-                  />
-                )}
               </View>
             );
           })}
         </ScrollView>
 
-        {/* FOOTER - INPUT BAR */}
-        <View style={[styles.footer, { paddingBottom: insets.bottom + 6 }]}>
-          <TouchableOpacity onPress={pickFromGallery}>
-            <Text style={styles.icon}>📎</Text>
+        <View style={[styles.footer, { paddingBottom: insets.bottom }]}>
+          <TouchableOpacity style={styles.iconButton} onPress={pickImage}>
+            <Feather name="paperclip" size={22} color="#BBBBBB" />
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={takePhoto}>
-            <Text style={styles.icon}>📷</Text>
+          <TouchableOpacity style={styles.iconButton} onPress={pickCamera}>
+            <Feather name="camera" size={22} color="#BBBBBB" />
           </TouchableOpacity>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Mensagem..."
-            value={input}
-            onChangeText={setInput}
-          />
+          <View style={styles.inputBox}>
+            <TextInput
+              style={styles.input}
+              placeholder="Mensagem..."
+              placeholderTextColor="#888"
+              value={text}
+              onChangeText={setText}
+            />
+          </View>
 
-          <TouchableOpacity onPress={sendText}>
-            <Text style={styles.sendBtn}>➤</Text>
+          <TouchableOpacity style={styles.iconButton} onPress={sendMessage}>
+            <Ionicons name="send" size={24} color="#4A80F0" />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -227,78 +238,96 @@ export default function Recognize() {
   );
 }
 
-// ======================
-// ESTILOS
-// ======================
+/* --- Markdown Styles --- */
+const markdownStyles = StyleSheet.create({
+  body: {
+    color: "#DDD",
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  heading1: {
+    color: "#FFF",
+    fontSize: 22,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  heading2: {
+    color: "#FFF",
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  heading3: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+});
 
+/* --- General Styles --- */
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#111",
   },
   chat: {
-    padding: 16,
+    paddingHorizontal: 12,
+    paddingTop: 15,
   },
-  messageRow: {
+  messageContainer: {
     flexDirection: "row",
-    marginBottom: 14,
-    alignItems: "flex-end",
+    marginBottom: 18,
   },
-  userRow: {
+  userAlign: {
     justifyContent: "flex-end",
   },
-  botRow: {
+  botAlign: {
     justifyContent: "flex-start",
   },
   bubble: {
     maxWidth: "75%",
     padding: 12,
-    borderRadius: 16,
+    borderRadius: 18,
   },
   userBubble: {
-    backgroundColor: "#5B8DF6",
-    marginLeft: 10,
+    backgroundColor: "#4A80F0",
+    marginLeft: "auto",
   },
   botBubble: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#222",
     borderWidth: 1,
-    borderColor: "#DDD",
-    marginRight: 10,
-  },
-  avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 50,
+    borderColor: "#333",
+    marginRight: "auto",
   },
   image: {
     width: 220,
     height: 220,
-    borderRadius: 12,
+    borderRadius: 14,
   },
   footer: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    backgroundColor: "#FFF",
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    backgroundColor: "#1A1A1A",
     borderTopWidth: 1,
-    borderColor: "#DDD",
+    borderColor: "#333",
   },
-  input: {
+  iconButton: {
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+  },
+  inputBox: {
     flex: 1,
-    backgroundColor: "#EEE",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
     marginHorizontal: 8,
   },
-  icon: {
-    fontSize: 26,
-    marginHorizontal: 6,
-  },
-  sendBtn: {
-    fontSize: 26,
-    color: "#4A80F0",
-    marginLeft: 4,
+  input: {
+    backgroundColor: "#2A2A2A",
+    color: "#FFF",
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderRadius: 20,
+    fontSize: 15,
   },
 });
